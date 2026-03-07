@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  userType      String    @default("FREELANCER")
+  onboarded     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+  websites        Website[]
+  landingPages    LandingPage[]
+  funnels         Funnel[]
+  emailCampaigns  EmailCampaign[]
+  contacts        Contact[]
+  socialCampaigns SocialCampaign[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Website {
+  id          String        @id @default(cuid())
+  userId      String
+  name        String
+  slug        String        @unique
+  description String?
+  published   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pages       WebsitePage[]
+}
+
+model WebsitePage {
+  id        String  @id @default(cuid())
+  websiteId String
+  title     String
+  slug      String
+  blocks    String  @default("[]")
+  sortOrder Int     @default(0)
+  website   Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, slug])
+}
+
+model LandingPage {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String
+  slug       String   @unique
+  blocks     String   @default("[]")
+  published  Boolean  @default(false)
+  templateId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Funnel {
+  id          String       @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  published   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps       FunnelStep[]
+}
+
+model FunnelStep {
+  id        String @id @default(cuid())
+  funnelId  String
+  name      String
+  type      String @default("landing")
+  blocks    String @default("[]")
+  sortOrder Int    @default(0)
+  funnel    Funnel @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+}
+
+model EmailCampaign {
+  id          String               @id @default(cuid())
+  userId      String
+  name        String
+  subject     String?
+  body        String?
+  status      String               @default("draft")
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipients  CampaignRecipient[]
+}
+
+model CampaignRecipient {
+  id         String        @id @default(cuid())
+  campaignId String
+  contactId  String
+  status     String        @default("pending")
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact    Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+}
+
+model Contact {
+  id        String              @id @default(cuid())
+  userId    String
+  email     String
+  name      String?
+  company   String?
+  phone     String?
+  status    String              @default("lead")
+  source    String?
+  notes     String?
+  tags      String?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns CampaignRecipient[]
+
+  @@unique([userId, email])
+}
+
+model SocialCampaign {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  platform    String
+  content     String?
+  mediaUrl    String?
+  status      String    @default("draft")
+  scheduledAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
