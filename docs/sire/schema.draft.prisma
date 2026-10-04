@@ -1,0 +1,288 @@
+// Borrador del modelo de datos — Módulo 1: descarga de documentos SIRE.
+// Ver docs/sire/ESQUEMA-SIRE.md. No está conectado al schema actual
+// (prisma/schema.prisma); se integrará al migrar a PostgreSQL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Enums ───────────────────────────────
+
+enum Role {
+  ADMIN
+  CONTADOR
+  ASISTENTE
+}
+
+enum ClientPermission {
+  READ // ver archivos ya descargados
+  DOWNLOAD // solicitar nuevas descargas a SUNAT
+  MANAGE // editar datos y credenciales del cliente
+}
+
+enum CredentialStatus {
+  SIN_PROBAR
+  VALIDA
+  INVALIDA
+  REVOCADA
+}
+
+enum SireBook {
+  RVIE // 140000 – Registro de Ventas e Ingresos Electrónico
+  RCE // 080000 – Registro de Compras Electrónico
+}
+
+enum FileFormat {
+  TXT // codTipoArchivo = 0
+  XLS // codTipoArchivo = 1
+}
+
+enum DownloadStatus {
+  PENDIENTE
+  SOLICITANDO_TICKET
+  EN_PROCESO_SUNAT
+  DESCARGANDO
+  COMPLETADA
+  ERROR // transitorio, se reintentará
+  FALLIDA // definitivo
+  CANCELADA
+}
+
+// ─────────────────────── Tenancy, usuarios y roles ───────────────────
+
+model Organization {
+  id          String   @id @default(cuid())
+  ruc         String?  @unique
+  razonSocial String
+  plan        String   @default("BASIC")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships Membership[]
+  clients     Client[]
+  batches     SireDownloadBatch[]
+  auditLogs   AuditLog[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String?
+  mfaEnabled   Boolean  @default(false)
+  mfaSecretEnc String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships Membership[]
+}
+
+model Membership {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           Role
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientAccess UserClientAccess[]
+  requests     SireDownloadRequest[]
+  batches      SireDownloadBatch[]
+
+  @@unique([organizationId, userId])
+}
+
+// ───────────────────────────── Clientes ──────────────────────────────
+
+model Client {
+  id                  String   @id @default(cuid())
+  organizationId      String
+  ruc                 String   @db.Char(11)
+  razonSocial         String
+  nombreComercial     String?
+  regimenTributario   String? // RG, RMT, RER, NRUS
+  estadoContribuyente String? // ACTIVO, BAJA, SUSPENSION...
+  condicionDomicilio  String? // HABIDO, NO HABIDO
+  afectoSire          Boolean  @default(true)
+  activo              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  credential   SunatCredential?
+  access       UserClientAccess[]
+  periods      SirePeriod[]
+  requests     SireDownloadRequest[]
+  files        SireFile[]
+
+  @@unique([organizationId, ruc])
+  @@index([organizationId, activo])
+}
+
+model UserClientAccess {
+  id           String           @id @default(cuid())
+  membershipId String
+  clientId     String
+  permission   ClientPermission @default(DOWNLOAD)
+  createdAt    DateTime         @default(now())
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, clientId])
+}
+
+// ─────────────────────── Credenciales SUNAT ──────────────────────────
+// Campos *Enc: cifrados con AES-256-GCM (iv:authTag:ciphertext, base64).
+
+model SunatCredential {
+  id                 String           @id @default(cuid())
+  clientId           String           @unique
+  solUser            String // usuario SOL (sin RUC)
+  solPasswordEnc     String
+  apiClientId        String
+  apiClientSecretEnc String
+  keyVersion         Int              @default(1) // versión de la clave maestra
+  status             CredentialStatus @default(SIN_PROBAR)
+  lastValidatedAt    DateTime?
+  lastError          String?
+  updatedById        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  client     Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tokenCache SunatTokenCache?
+}
+
+model SunatTokenCache {
+  id             String   @id @default(cuid())
+  credentialId   String   @unique
+  accessTokenEnc String
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  credential SunatCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────── SIRE ────────────────────────────────
+
+// Periodos que SUNAT reporta como disponibles para cada libro y cliente.
+model SirePeriod {
+  id            String   @id @default(cuid())
+  clientId      String
+  book          SireBook
+  perTributario String   @db.Char(6) // YYYYMM
+  estado        String? // estado devuelto por SUNAT
+  syncedAt      DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, book, perTributario])
+}
+
+// Catálogo configurable de reportes descargables (evita hardcodear endpoints).
+model SireReportType {
+  id               String       @id @default(cuid())
+  code             String       @unique // p.ej. RVIE_PROPUESTA, RCE_PROPUESTA
+  book             SireBook
+  nombre           String
+  endpointTemplate String // ruta relativa con {perTributario}, {codTipoArchivo}
+  formats          FileFormat[]
+  active           Boolean      @default(true)
+
+  requests SireDownloadRequest[]
+}
+
+model SireDownloadBatch {
+  id             String   @id @default(cuid())
+  organizationId String
+  requestedById  String
+  total          Int      @default(0)
+  completed      Int      @default(0)
+  failed         Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requestedBy  Membership            @relation(fields: [requestedById], references: [id])
+  requests     SireDownloadRequest[]
+}
+
+model SireDownloadRequest {
+  id            String         @id @default(cuid())
+  clientId      String
+  reportTypeId  String
+  batchId       String?
+  requestedById String
+  perTributario String         @db.Char(6)
+  format        FileFormat     @default(TXT)
+  status        DownloadStatus @default(PENDIENTE)
+  numTicket     String?
+  codProceso    String?
+  attempts      Int            @default(0)
+  nextPollAt    DateTime?
+  errorCode     String?
+  errorMessage  String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  reportType  SireReportType     @relation(fields: [reportTypeId], references: [id])
+  batch       SireDownloadBatch? @relation(fields: [batchId], references: [id])
+  requestedBy Membership         @relation(fields: [requestedById], references: [id])
+  files       SireFile[]
+
+  // La deduplicación de solicitudes activas se hace con un índice único
+  // parcial en SQL (WHERE status NOT IN ('COMPLETADA','FALLIDA','CANCELADA')).
+  @@index([clientId, reportTypeId, perTributario])
+  @@index([status, nextPollAt])
+}
+
+model SireFile {
+  id            String   @id @default(cuid())
+  requestId     String
+  clientId      String
+  perTributario String   @db.Char(6)
+  storageKey    String   @unique // ruta en S3/R2: org/{orgId}/client/{ruc}/{YYYYMM}/...
+  fileName      String // nombre original de SUNAT
+  mimeType      String
+  sizeBytes     Int
+  sha256        String
+  recordCount   Int?
+  version       Int      @default(1)
+  isLatest      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  request SireDownloadRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  client  Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, perTributario, isLatest])
+}
+
+// ───────────────────────────── Auditoría ─────────────────────────────
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  action         String // CREDENTIAL_UPDATED, SIRE_DOWNLOAD_REQUESTED, FILE_DOWNLOADED...
+  entity         String
+  entityId       String?
+  ip             String?
+  userAgent      String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([entity, entityId])
+}
