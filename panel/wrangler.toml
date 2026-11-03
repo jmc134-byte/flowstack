@@ -1,0 +1,18 @@
+name = "panel-lanzamientos"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Un solo cron cada minuto: el despachador decide qué toca (ver docs/FASE-0-PLAN.md §4.2).
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "panel"
+# Se completa con el ID que devuelve `wrangler d1 create panel`.
+database_id = "REEMPLAZAR_CON_ID_DE_D1"
+migrations_dir = "migrations"
+
+# Secretos (nunca en este archivo; se cargan con `wrangler secret put`):
+#   GHL_WEBHOOK_SECRET                 secreto del header X-Panel-Secret de los workflows de GHL
+#   STRIPE_WEBHOOK_SECRET_NORTHBOUND   whsec_ del webhook de la cuenta Northbound Studio
