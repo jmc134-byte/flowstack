@@ -312,3 +312,32 @@ La conciliación de cada conector compara, en el mismo rango, el total de la fue
 | Meta | Gasto y leads del Administrador de anuncios | `meta_insights_daily` |
 | GHL | Conteo de contactos filtrado por etiqueta en GHL | `registrations` |
 | Stripe | Total bruto, reembolsos y comisiones del Dashboard | `stripe_payments` |
+
+---
+
+## 10. Cobros: sistema propio con Stripe, Authorize.net y PayPal (actualizado el 3 nov)
+
+Los cobros pasan por un sistema hecho a medida que integra **Stripe, Authorize.net y PayPal**. Los gateways por separado no saben qué es "cuota 2 de 3", a qué lanzamiento pertenece un pago ni qué producto se vendió. Eso solo lo sabe el sistema propio.
+
+Revisé en la documentación oficial lo que entrega cada gateway:
+
+- **Authorize.net**
+  - Webhooks firmados con `X-ANET-Signature` (HMAC-SHA512 con la Signature Key).
+  - Tiene eventos de cobro, reembolso, anulación, fraude y suscripciones ARB, pero **no tiene evento de contracargo**.
+  - Reintenta hasta 10 veces.
+  - La API de reportes da lotes liquidados, transacciones y las 1,000 transacciones no liquidadas más recientes. La página no menciona comisiones ni contracargos.
+  - Las credenciales son el API Login ID y la Transaction Key. No encontré una credencial de solo lectura, así que con esas mismas claves se puede cobrar **[sin verificar a fondo]**. Eso choca con la regla de solo lectura.
+  - Fuentes: developer.authorize.net/api/reference/features/webhooks.html y …/transaction_reporting.html
+- **PayPal**
+  - Webhooks verificables, ya sea de forma local (CRC32 + certificado) o con `POST /v1/notifications/verify-webhook-signature`.
+  - Reportes con `GET /v1/reporting/transactions`. El retraso de los datos, el rango máximo y el campo de comisiones están **[sin verificar]**.
+  - Fuentes: developer.paypal.com/api/rest/webhooks/rest/ y /docs/api/transaction-search/v1/
+
+**Propuesta:**
+1. **El sistema propio es la fuente principal de ventas.** Debe enviar al panel un webhook firmado con HMAC-SHA256 por cada evento: orden pagada, cuota cobrada, cuota fallida, reembolso y contracargo. Cada evento lleva el ID de la orden, el lanzamiento o producto, el tipo de pago (único o cuota n de N), el monto, la comisión si la conoce, el gateway, el ID de la transacción en el gateway, la hora en UTC y el email (que el panel convierte en hash al llegar). Este formato lo defino yo y lo implementa quien mantiene el sistema.
+   - Alternativa sin tocar el sistema: acceso de **solo lectura** a su base de datos o a una API de reportes.
+2. **Los gateways se usan para conciliar.**
+   - Stripe queda conectado como ya está construido, con webhook firmado y clave de solo lectura, para comisiones, reembolsos y contracargos.
+   - Para Authorize.net y PayPal, en la fase 1 se conciliará contra una **exportación CSV** mensual o por lanzamiento. No hace falta darle al panel credenciales que permiten cobrar.
+   - Una conexión directa por API queda para la fase 2, si se confirma una forma de solo lectura.
+3. **Los contracargos de Authorize.net no llegan por webhook.** Se toman del sistema propio, si lo registra, o de la exportación.
