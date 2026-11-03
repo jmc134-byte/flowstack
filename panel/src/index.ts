@@ -156,6 +156,26 @@ app.get("/api/salud", async (c) => {
   return c.json({ ok: true, ahora: nowIso(), conexiones: results });
 });
 
+// ───── Página de estado (temporal, hasta que lleguen las pantallas) ─────
+const STATUS_PAGE = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Panel de lanzamientos</title>
+<style>:root{color-scheme:dark}body{margin:0;padding:24px 16px;font:17px/1.5 -apple-system,system-ui,sans-serif;background:#0f1115;color:#e8eaed}
+h1{font-size:22px;margin:0 0 4px}p{color:#9aa0a6;margin:0 0 20px}.c{background:#1a1d23;border-radius:14px;padding:14px 16px;margin:0 0 10px}
+.n{font-weight:600}.ok{color:#5bd68a}.error{color:#ff6b6b}.sin_credenciales,.unknown{color:#f5c451}small{color:#9aa0a6;display:block}</style></head>
+<body><h1>Panel de lanzamientos</h1><p>Estado de las fuentes. Las pantallas llegan en las próximas entregas.</p><div id="l">Cargando…</div>
+<script>
+const fmt=t=>t?new Date(t).toLocaleString("es",{timeZone:"America/New_York",weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})+" (Miami)":"nunca";
+const label={ok:"Funcionando",error:"Con errores",sin_credenciales:"Sin credenciales",unknown:"Sin datos"};
+fetch("/api/salud").then(r=>r.json()).then(d=>{const el=document.getElementById("l");
+if(!d.conexiones.length){el.textContent="Aún no hay fuentes conectadas.";return}
+el.innerHTML="";for(const c of d.conexiones){const div=document.createElement("div");div.className="c";
+const n=document.createElement("div");n.className="n";n.textContent=c.id;
+const s=document.createElement("div");s.className=c.status;s.textContent=label[c.status]||c.status;
+const m=document.createElement("small");m.textContent="Último dato: "+fmt(c.last_data_at)+(c.last_error?" · Error: "+c.last_error:"");
+div.append(n,s,m);el.append(div)}}).catch(()=>{document.getElementById("l").textContent="No se pudo leer el estado."});
+</script></body></html>`;
+app.get("/", (c) => c.html(STATUS_PAGE));
+
 app.notFound((c) => c.json({ ok: false, error: "no encontrado" }, 404));
 
 export default {
