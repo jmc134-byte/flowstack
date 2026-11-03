@@ -9,8 +9,8 @@ crons = ["* * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "panel"
-# Se completa con el ID que devuelve `wrangler d1 create panel`.
-database_id = "REEMPLAZAR_CON_ID_DE_D1"
+# ID de la base D1 de producción.
+database_id = "f6869ac2-5e2f-4a42-8540-024e69a053c5"
 migrations_dir = "migrations"
 
 # Secretos (nunca en este archivo; se cargan con `wrangler secret put`):
