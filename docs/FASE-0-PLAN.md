@@ -175,6 +175,30 @@ Cada definición de `SPEC.md` es una función pura en `lib/metrics/*`, con prueb
 | API de Stripe | $0. La documentación no lo dice explícitamente: no cobra por llamadas, pero dentro del tope de lecturas por transacción. |
 | **Total** | **≈ $45/mes**, más un dominio si quieres uno propio (~$1–2 al mes) |
 
+### 4.1 Opción low-cost (recomendada tras la revisión del 3 nov): ≈ $5/mes
+
+Revisado en la documentación de Cloudflare el 3 nov 2026:
+
+- **Workers Paid** cuesta $5 al mes (mínimo por cuenta) e incluye 10 millones de solicitudes y 30 millones de ms de CPU. Permite 250 tareas programadas (Cron Triggers) que pueden correr **cada minuto** (`* * * * *`, en UTC). Cada ejecución tiene hasta 30 s de CPU.
+  - Fuente: developers.cloudflare.com/workers/platform/pricing, /limits y /configuration/cron-triggers
+- **D1** es la base de datos (SQLite administrado). Con el plan pago incluye 25 mil millones de lecturas y 50 millones de escrituras al mes, más 5 GB. Permite restaurar a cualquier momento de los últimos **30 días** (Time Travel). No se pausa por inactividad y no cobra horas de cómputo.
+  - Fuente: developers.cloudflare.com/d1/reference/time-travel
+- **Por qué no Next.js aquí:** en Cloudflare, Next.js corre sobre vinext, que está en beta, o sobre el adaptador OpenNext, que la documentación presenta como alternativa de respaldo. No quiero arriesgar la semana de clases en eso.
+  - Propuesta: **React + Vite como PWA estática** y una API en **Hono** dentro del mismo Worker. Sigue siendo TypeScript, y las métricas y las pruebas no cambian.
+- **Por qué no el plan gratis de Workers:** limita la CPU a 10 ms por solicitud y permite solo 5 cron triggers. Procesar un webhook o una página de insights puede pasar ese límite, y fallar en plena clase no es aceptable.
+- **Se mantiene igual:** solo lectura, secretos solo en el servidor (Worker secrets), webhooks verificados, inbox idempotente, el modelo de datos de la sección 3 (en SQLite) y el acceso con passkey o enlace mágico (Resend gratis). Que SimpleWebAuthn funcione en Workers está **[sin verificar]**; lo pruebo el primer día, y si falla el acceso queda solo con enlace mágico hasta resolverlo.
+
+| Opción | Servicios | USD/mes | Riesgo |
+|---|---|---|---|
+| **A, recomendada** | Cloudflare Workers Paid + D1 + Resend gratis + subdominio `*.workers.dev` | **$5** | Bajo. Hay que cambiar de framework, sin efecto en las funciones. |
+| B, intermedia | Vercel Pro + Neon Postgres Free (1 GB, 100 horas de CU al mes, se suspende a los 5 min sin uso, no borra datos) | $20 | Las horas de cómputo de Neon pueden no alcanzar en la semana del carrito si sincronizamos cada 15 min. |
+| C, original | Vercel Pro + Supabase Pro | $45 | Bajo. Es la más cara. |
+
+Ahorros que aplican en cualquier opción:
+- Usar el subdominio gratuito en lugar de un dominio propio.
+- Sincronizar cada hora fuera de las semanas de lanzamiento y cada 15 min solo durante ellas.
+- Muestrear YouTube solo dentro de la ventana de cada clase.
+
 ## 5. Credenciales y datos que necesito
 
 **Meta**
@@ -197,7 +221,7 @@ Cada definición de `SPEC.md` es una función pura en `lib/metrics/*`, con prueb
 11. Los IDs de los videos de las 3 clases, en cuanto programes los lives.
 
 **Plataforma**
-12. Las cuentas de Vercel y Supabase (o me das acceso y las creo yo), el dominio o subdominio del panel y tu email para la lista de acceso.
+12. Una cuenta de Cloudflare con Workers Paid ($5) en la opción A, o Vercel y Neon/Supabase en la B o la C. Además, tu email para la lista de acceso y una API key de Resend.
 
 ## 6. Lo que no se puede obtener por API
 
