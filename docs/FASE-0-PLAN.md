@@ -194,6 +194,20 @@ Revisado en la documentación de Cloudflare el 3 nov 2026:
 | B, intermedia | Vercel Pro + Neon Postgres Free (1 GB, 100 horas de CU al mes, se suspende a los 5 min sin uso, no borra datos) | $20 | Las horas de cómputo de Neon pueden no alcanzar en la semana del carrito si sincronizamos cada 15 min. |
 | C, original | Vercel Pro + Supabase Pro | $45 | Bajo. Es la más cara. |
 
+### 4.2 Ahorro máximo: $0/mes, con salida a $5 si hace falta (elegido el 3 nov)
+
+Se usa el plan gratis de Workers con D1 gratis. Sus límites son: 100,000 solicitudes al día, 10 ms de CPU por ejecución, 5 cron triggers por cuenta, 50 subrequests por ejecución, y en D1, 5 millones de lecturas y 100,000 escrituras al día con 5 GB. El diseño tiene que caber en esos límites:
+
+- **Un solo cron cada minuto** que decide qué toca:
+  - YouTube, solo dentro de la ventana de cada clase (15 min antes y 30 min después).
+  - Meta, GHL y Stripe cada 15 min en semanas de lanzamiento y cada hora fuera de ellas.
+  - Son 1,440 ejecuciones al día, muy por debajo del límite.
+- **Trabajo en pedazos pequeños.** Las cargas históricas y la paginación avanzan una página por ejecución, con el cursor guardado en D1. Así cada ejecución queda bajo los 10 ms de CPU y las 50 subrequests. La espera de red no cuenta como CPU.
+- **Webhooks con trabajo mínimo.** Al llegar uno solo se verifica la firma o el secreto y se guarda en el inbox. El procesamiento ocurre en el siguiente minuto.
+- **Métricas preagregadas** en tablas resumen, para que cada pantalla haga pocas lecturas.
+- **Vigilancia de los límites.** La pantalla Conexiones muestra los errores por límite de CPU. Si un trabajo los pasa de forma repetida, se cambia a Workers Paid ($5) **sin tocar el código**. Recomiendo hacer ese cambio de forma preventiva del 16 al 25 nov, si el live de prueba del 12 nov muestra algún error.
+- **Riesgo.** Una ejecución que falla se reintenta al minuto siguiente. En YouTube eso puede costar un minuto de curva, y el respaldo de YouTube Analytics lo cubre.
+
 Ahorros que aplican en cualquier opción:
 - Usar el subdominio gratuito en lugar de un dominio propio.
 - Sincronizar cada hora fuera de las semanas de lanzamiento y cada 15 min solo durante ellas.
