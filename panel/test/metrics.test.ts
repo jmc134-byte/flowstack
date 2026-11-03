@@ -10,7 +10,7 @@ const rev = {
   pendingInstallmentsCents: 600000,
   refundedCents: 3 * 78500,
   disputedCents: 78500,
-  stripeFeesCents: 120000,
+  feesCents: 120000,
 };
 
 describe("definiciones de SPEC.md", () => {

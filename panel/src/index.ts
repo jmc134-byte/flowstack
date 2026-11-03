@@ -2,11 +2,12 @@ import { Hono } from "hono";
 import { checkGhlSecret, parseGhlWebhook } from "./webhooks/ghl";
 import { parseStripeEvent, stripeSecretName } from "./webhooks/stripe";
 import { verifyStripeSignature } from "./lib/stripeSignature";
+import { parseSaleEvent, salesSecretName } from "./webhooks/sales";
 
 export interface Env {
   DB: D1Database;
   GHL_WEBHOOK_SECRET?: string;
-  [key: string]: unknown; // STRIPE_WEBHOOK_SECRET_<CUENTA>
+  [key: string]: unknown; // STRIPE_WEBHOOK_SECRET_<CUENTA>, VENTAS_WEBHOOK_SECRET_<SISTEMA>
 }
 
 const nowIso = () => new Date().toISOString();
@@ -103,6 +104,46 @@ app.post("/api/webhooks/stripe/:account", async (c) => {
     .bind(ev.eventId, account, ev.type, ev.createdAt, ev.livemode ? 1 : 0, ev.redactedPayload, nowIso())
     .run();
   await markConnection(c.env.DB, connId, "stripe");
+  return c.json({ ok: true, duplicado: res.meta.changes === 0 });
+});
+
+// ───── Sistema de cobros propio: contrato v1 (docs/CONTRATO-VENTAS.md) ─────
+// Firma igual que Stripe: header X-Panel-Signature: t=<unix>,v1=<hex HMAC-SHA256 de "t.cuerpo">.
+app.post("/api/webhooks/ventas/:system", async (c) => {
+  const system = c.req.param("system");
+  const secretName = salesSecretName(system);
+  const secret = secretName ? c.env[secretName] : undefined;
+  if (typeof secret !== "string" || secret.length < 32) return c.json({ ok: false, error: "sistema no configurado" }, 404);
+  const raw = await c.req.text();
+  const sig = await verifyStripeSignature(raw, c.req.header("x-panel-signature") ?? null, secret);
+  if (!sig.ok) return c.json({ ok: false, error: sig.reason }, 401);
+  const connId = `ventas:${system}`;
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    await markConnection(c.env.DB, connId, "ventas", "JSON inválido");
+    return c.json({ ok: false, error: "JSON inválido" }, 400);
+  }
+  const ev = await parseSaleEvent(body);
+  if ("errors" in ev) {
+    await markConnection(c.env.DB, connId, "ventas", `evento rechazado: ${ev.errors.join("; ")}`);
+    return c.json({ ok: false, errores: ev.errors }, 422);
+  }
+  const res = await c.env.DB.prepare(
+    `INSERT OR IGNORE INTO sales_events (event_id, system, type, occurred_at, order_id, launch_id, product, plan_type,
+       installment_number, installments_total, installment_cents, amount_cents, currency, fee_cents, gateway,
+       gateway_txn_id, email_hash, phone_hash, ghl_contact_id, reason, dispute_status, received_at, is_test)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)`,
+  )
+    .bind(
+      ev.eventId, system, ev.type, ev.occurredAt, ev.orderId, ev.launchId, ev.product, ev.planType,
+      ev.installmentNumber, ev.installmentsTotal, ev.installmentCents, ev.amountCents, ev.currency, ev.feeCents,
+      ev.gateway, ev.gatewayTxnId, ev.emailHash, ev.phoneHash, ev.ghlContactId, ev.reason, ev.disputeStatus,
+      nowIso(), ev.isTest ? 1 : 0,
+    )
+    .run();
+  await markConnection(c.env.DB, connId, "ventas");
   return c.json({ ok: true, duplicado: res.meta.changes === 0 });
 });
 

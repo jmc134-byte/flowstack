@@ -38,16 +38,16 @@ export interface RevenueInputs {
   pendingInstallmentsCents: number; // cuotas por cobrar de planes activos
   refundedCents: number;
   disputedCents: number; // contracargos perdidos o en curso
-  stripeFeesCents: number;
+  feesCents: number; // comisiones de la pasarela (Stripe, Authorize.net, PayPal)
 }
 
 /** Ingreso comprometido = cobrado − reembolsos − contracargos + cuotas por cobrar. */
 export const committedRevenue = (r: RevenueInputs) =>
   r.grossCollectedCents - r.refundedCents - r.disputedCents + r.pendingInstallmentsCents;
 
-/** Ingreso neto = cobrado − comisiones de Stripe − reembolsos (y contracargos). */
+/** Ingreso neto = cobrado − comisiones de las pasarelas − reembolsos (y contracargos). */
 export const netRevenue = (r: RevenueInputs) =>
-  r.grossCollectedCents - r.stripeFeesCents - r.refundedCents - r.disputedCents;
+  r.grossCollectedCents - r.feesCents - r.refundedCents - r.disputedCents;
 
 /** CPA = gasto total / ventas netas. */
 export const cpa = (totalSpendCents: number | null, sales: SalesCounts) =>
