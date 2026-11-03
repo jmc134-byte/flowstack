@@ -5,11 +5,12 @@ import { verifyStripeSignature } from "./lib/stripeSignature";
 import { parseSaleEvent, salesSecretName } from "./webhooks/sales";
 import { runDueJobs } from "./sync/runner";
 
-export interface Env {
-  DB: D1Database;
-  GHL_WEBHOOK_SECRET?: string;
-  [key: string]: unknown; // STRIPE_WEBHOOK_SECRET_<CUENTA>, VENTAS_WEBHOOK_SECRET_<SISTEMA>
-}
+import type { Env } from "./env";
+import { authRoutes, requireAuth, type AuthVars } from "./auth";
+import { launchRoutes } from "./api/launches";
+import { manualRoutes } from "./api/manual";
+import { connectionRoutes, screenRoutes } from "./api/screens";
+export type { Env };
 
 const nowIso = () => new Date().toISOString();
 
@@ -34,7 +35,15 @@ async function markConnection(db: D1Database, id: string, source: string, error?
   }
 }
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
+
+// Encabezados de seguridad en todas las respuestas de la API.
+app.use("*", async (c, next) => {
+  await next();
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("Referrer-Policy", "no-referrer");
+  c.header("X-Frame-Options", "DENY");
+});
 
 // ───── GHL: Custom Webhook desde los workflows ─────
 app.post("/api/webhooks/ghl/:locationId", async (c) => {
@@ -148,33 +157,18 @@ app.post("/api/webhooks/ventas/:system", async (c) => {
   return c.json({ ok: true, duplicado: res.meta.changes === 0 });
 });
 
-// ───── Estado de fuentes (sin datos de negocio ni personales) ─────
-app.get("/api/salud", async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, source, status, last_data_at, last_error_at, last_error FROM connections ORDER BY id`,
-  ).all();
-  return c.json({ ok: true, ahora: nowIso(), conexiones: results });
-});
+// ───── Público: solo un ping sin datos ─────
+app.get("/api/ping", (c) => c.json({ ok: true }));
 
-// ───── Página de estado (temporal, hasta que lleguen las pantallas) ─────
-const STATUS_PAGE = `<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Panel de lanzamientos</title>
-<style>:root{color-scheme:dark}body{margin:0;padding:24px 16px;font:17px/1.5 -apple-system,system-ui,sans-serif;background:#0f1115;color:#e8eaed}
-h1{font-size:22px;margin:0 0 4px}p{color:#9aa0a6;margin:0 0 20px}.c{background:#1a1d23;border-radius:14px;padding:14px 16px;margin:0 0 10px}
-.n{font-weight:600}.ok{color:#5bd68a}.error{color:#ff6b6b}.sin_credenciales,.unknown{color:#f5c451}small{color:#9aa0a6;display:block}</style></head>
-<body><h1>Panel de lanzamientos</h1><p>Estado de las fuentes. Las pantallas llegan en las próximas entregas.</p><div id="l">Cargando…</div>
-<script>
-const fmt=t=>t?new Date(t).toLocaleString("es",{timeZone:"America/New_York",weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})+" (Miami)":"nunca";
-const label={ok:"Funcionando",error:"Con errores",sin_credenciales:"Sin credenciales",unknown:"Sin datos"};
-fetch("/api/salud").then(r=>r.json()).then(d=>{const el=document.getElementById("l");
-if(!d.conexiones.length){el.textContent="Aún no hay fuentes conectadas.";return}
-el.innerHTML="";for(const c of d.conexiones){const div=document.createElement("div");div.className="c";
-const n=document.createElement("div");n.className="n";n.textContent=c.id;
-const s=document.createElement("div");s.className=c.status;s.textContent=label[c.status]||c.status;
-const m=document.createElement("small");m.textContent="Último dato: "+fmt(c.last_data_at)+(c.last_error?" · Error: "+c.last_error:"");
-div.append(n,s,m);el.append(div)}}).catch(()=>{document.getElementById("l").textContent="No se pudo leer el estado."});
-</script></body></html>`;
-app.get("/", (c) => c.html(STATUS_PAGE));
+// ───── Acceso ─────
+app.route("/api/auth", authRoutes);
+
+// ───── API protegida (solo con sesión) ─────
+app.use("/api/v1/*", requireAuth);
+app.route("/api/v1/lanzamientos", launchRoutes);
+app.route("/api/v1/manual", manualRoutes);
+app.route("/api/v1/pantallas", screenRoutes);
+app.route("/api/v1/conexiones", connectionRoutes);
 
 app.notFound((c) => c.json({ ok: false, error: "no encontrado" }, 404));
 

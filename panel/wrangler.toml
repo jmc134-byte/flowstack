@@ -16,3 +16,13 @@ migrations_dir = "migrations"
 # Secretos (nunca en este archivo; se cargan con `wrangler secret put`):
 #   GHL_WEBHOOK_SECRET                 secreto del header X-Panel-Secret de los workflows de GHL
 #   STRIPE_WEBHOOK_SECRET_NORTHBOUND   whsec_ del webhook de la cuenta Northbound Studio
+
+# App (PWA) compilada con Vite. El Worker atiende primero /api/*; el resto son archivos estáticos.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[vars]
+OWNER_EMAIL = "jmc134@gmail.com"

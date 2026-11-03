@@ -14,6 +14,7 @@ export function createFakeD1(): D1Database {
     return idx.length ? idx.map((i) => args[i] ?? null) : args;
   };
   const make = (sql: string, args: unknown[] = []): any => ({
+    __sql: sql,
     bind: (...a: unknown[]) => make(sql, a),
     async run() {
       const r = db.prepare(norm(sql)).run(...(expand(sql, args) as any[]));
@@ -22,13 +23,23 @@ export function createFakeD1(): D1Database {
     async all() {
       return { success: true, results: db.prepare(norm(sql)).all(...(expand(sql, args) as any[])) };
     },
+    async raw() {
+      return db.prepare(norm(sql)).all(...(expand(sql, args) as any[])).map((r: any) => Object.values(r));
+    },
     async first() {
       return db.prepare(norm(sql)).get(...(expand(sql, args) as any[])) ?? null;
     },
   });
   return {
     prepare: (sql: string) => make(sql),
-    batch: async (stmts: any[]) => Promise.all(stmts.map((s) => s.run())),
+    batch: async (stmts: any[]) => {
+      const out = [];
+      for (const st of stmts) {
+        const sql: string = st.__sql;
+        out.push(/^\s*(SELECT|WITH)/i.test(sql) ? await st.all() : await st.run());
+      }
+      return out;
+    },
     exec: async (sql: string) => db.exec(sql),
     __raw: db,
   } as unknown as D1Database;
