@@ -16,6 +16,33 @@ Especificación: `../docs/SPEC.md`. Plan aprobado: `../docs/FASE-0-PLAN.md` (§4
 - Hay un cron único cada minuto, el despachador, que por ahora solo registra que está vivo.
 - Las definiciones de métricas de SPEC.md, la comparación "al mismo corte horario" y los formatos `$16,500` y "mar 17 nov" tienen pruebas en `test/`.
 
+## Entrega 2 (3 nov 2026)
+- **Contrato de ventas v1** para el sistema de cobros propio (Stripe, Authorize.net y PayPal), en `POST /api/webhooks/ventas/{sistema}`. Usa firma HMAC y es idempotente. Ver `../docs/CONTRATO-VENTAS.md`. Los datos de prueba están en `test/sales.test.ts` y el envío de prueba en `scripts/enviar-venta-prueba.mjs`.
+- **Resumen de ventas**: compras, ventas netas, mix de pago único y cuotas, cuotas cobradas, pendientes y fallidas, ingreso bruto, neto y comprometido. Las comisiones desconocidas hacen que el neto se marque como estimado.
+- **Conector de Meta**, solo lectura (v26.0):
+  - Insights diarios por anuncio, con carga histórica desde `META_BACKFILL_SINCE`. Después vuelve a leer los últimos 3 días en cada ciclo.
+  - Registro de actividad, que se va acumulando.
+  - Usa `appsecret_proof` en las llamadas, lee la zona horaria de la cuenta y rechaza cuentas que no estén en USD.
+- **Conector de GHL**, solo lectura: búsqueda de contactos por etiqueta con paginación. Guarda solo el ID, las etiquetas, `dateAdded`, el hash del email y la atribución, con las URLs sin parámetros.
+- **Despachador**: hace como máximo 2 llamadas por minuto, guarda el avance en `sync_state` y reintenta con espera exponencial (5 veces más larga ante un límite de uso). Una fuente sin credenciales aparece en `/api/salud` como `sin_credenciales`.
+
+### Variables y secretos de los conectores
+| Nombre | Ejemplo | Tipo |
+|---|---|---|
+| `META_AD_ACCOUNTS` | `act_123456789` | variable |
+| `META_BACKFILL_SINCE` | `2026-10-01` | variable |
+| `META_TOKEN` | token del usuario del sistema (`ads_read`) | secreto |
+| `META_APP_SECRET` | app secret | secreto |
+| `GHL_LOCATIONS` | `kZT0P8HbGrGXuUGi7QJy` | variable |
+| `GHL_TAGS_kZT0P8HbGrGXuUGi7QJy` | `registrotm2,comprotm1,interesadonopago` | variable |
+| `GHL_PIT_kZT0P8HbGrGXuUGi7QJy` | token de integración privada (solo lectura) | secreto |
+| `VENTAS_WEBHOOK_SECRET_PRINCIPAL` | 32 caracteres o más | secreto |
+| `SYNC_ACTIVE` | `1` en semanas de lanzamiento (cada 15 min); sin valor, cada 60 min | variable |
+
+**Pendiente de confirmar contra las cuentas reales, en la primera conciliación:**
+- la sintaxis del filtro por etiqueta en la búsqueda de GHL;
+- dónde viene el cursor `searchAfter` en la respuesta.
+
 ## Comandos
 ```bash
 npm install

@@ -3,6 +3,7 @@ import { checkGhlSecret, parseGhlWebhook } from "./webhooks/ghl";
 import { parseStripeEvent, stripeSecretName } from "./webhooks/stripe";
 import { verifyStripeSignature } from "./lib/stripeSignature";
 import { parseSaleEvent, salesSecretName } from "./webhooks/sales";
+import { runDueJobs } from "./sync/runner";
 
 export interface Env {
   DB: D1Database;
@@ -159,9 +160,9 @@ app.notFound((c) => c.json({ ok: false, error: "no encontrado" }, 404));
 
 export default {
   fetch: app.fetch,
-  // Despachador único cada minuto (docs/FASE-0-PLAN.md §4.2). Por ahora solo deja constancia
-  // de que el cron está vivo; los conectores se agregan aquí en las siguientes entregas.
+  // Despachador único cada minuto (docs/FASE-0-PLAN.md §4.2).
   async scheduled(_event: ScheduledController, env: Env) {
     await markConnection(env.DB, "cron:despachador", "cron");
+    await runDueJobs(env);
   },
 } satisfies ExportedHandler<Env>;
